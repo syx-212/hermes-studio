@@ -31,11 +31,7 @@ import ConversationMonitorPane from "./ConversationMonitorPane.vue";
 import MessageList from "./MessageList.vue";
 import SessionListItem from "./SessionListItem.vue";
 import OutlinePanel from "./OutlinePanel.vue";
-import FilesPanel from "./FilesPanel.vue";
-import TerminalPanel from "./TerminalPanel.vue";
 import PageSidebarNav from "@/components/layout/PageSidebarNav.vue";
-import SettingsCircuitBadge from "@/components/layout/SettingsCircuitBadge.vue";
-import { isStoredSuperAdmin } from "@/api/client";
 
 const chatStore = useChatStore();
 const appStore = useAppStore();
@@ -44,21 +40,12 @@ const sessionBrowserPrefsStore = useSessionBrowserPrefsStore();
 const router = useRouter();
 const message = useMessage();
 const { t } = useI18n();
-const isSuperAdmin = computed(() => isStoredSuperAdmin());
 
 const showOutline = ref(false);
 const messageListRef = ref<InstanceType<typeof MessageList> | null>(null);
 const chatInputRef = ref<(InstanceType<typeof ChatInput> & { addFiles?: (files: File[]) => void }) | null>(null);
-const chatContentWrapperRef = ref<HTMLElement | null>(null);
 const chatDropCounter = ref(0);
 const isChatDropActive = ref(false);
-const showToolPanel = ref(false);
-const activeToolPanel = ref<"files" | "terminal">("files");
-const TOOL_PANEL_MIN_WIDTH = 360;
-const TOOL_PANEL_DEFAULT_WIDTH = 560;
-const TOOL_PANEL_STORAGE_KEY = "hermes.chat.toolPanelWidth";
-const toolPanelWidth = ref(loadToolPanelWidth());
-const toolResizeStart = ref<{ x: number; width: number } | null>(null);
 
 const currentMode = ref<"chat" | "live">("chat");
 
@@ -80,9 +67,6 @@ const showSessions = ref(
 );
 let mobileQuery: MediaQueryList | null = null;
 const isMobile = ref(false);
-const toolPanelStyle = computed(() => ({
-  width: isMobile.value ? "100%" : `${toolPanelWidth.value}px`,
-}));
 
 function sessionHref(sessionId: string) {
   return router.resolve({
@@ -99,65 +83,6 @@ function openSessionInNewTab(sessionId: string) {
 function handleOutlineNavigate(target: { messageId: string; anchorId: string }) {
   messageListRef.value?.scrollToAnchor(target.messageId, target.anchorId);
   if (isMobile.value) showOutline.value = false;
-}
-
-function loadToolPanelWidth() {
-  if (typeof window === "undefined") return TOOL_PANEL_DEFAULT_WIDTH;
-  const saved = Number.parseInt(
-    window.localStorage.getItem(TOOL_PANEL_STORAGE_KEY) || "",
-    10,
-  );
-  return Number.isFinite(saved) ? Math.round(saved) : TOOL_PANEL_DEFAULT_WIDTH;
-}
-
-function toolPanelMaxWidth() {
-  if (typeof window === "undefined") return 1180;
-  if (isMobile.value) return window.innerWidth;
-  const available = chatContentWrapperRef.value?.clientWidth || window.innerWidth;
-  return Math.max(320, Math.min(Math.floor(available * 0.88), available - 120));
-}
-
-function clampToolPanelWidth(width: number) {
-  const maxWidth = toolPanelMaxWidth();
-  const minWidth = Math.min(TOOL_PANEL_MIN_WIDTH, maxWidth);
-  return Math.min(maxWidth, Math.max(minWidth, Math.round(width)));
-}
-
-function handleToolPanelViewportResize() {
-  if (isMobile.value) return;
-  toolPanelWidth.value = clampToolPanelWidth(toolPanelWidth.value);
-}
-
-function handleToolResizeMove(event: PointerEvent) {
-  const start = toolResizeStart.value;
-  if (!start) return;
-  const delta = start.x - event.clientX;
-  toolPanelWidth.value = clampToolPanelWidth(start.width + delta);
-}
-
-function stopToolResize() {
-  if (!toolResizeStart.value) return;
-  toolResizeStart.value = null;
-  window.removeEventListener("pointermove", handleToolResizeMove);
-  window.removeEventListener("pointerup", stopToolResize);
-  if (!isMobile.value) {
-    window.localStorage.setItem(TOOL_PANEL_STORAGE_KEY, String(toolPanelWidth.value));
-  }
-  document.body.style.userSelect = "";
-  document.body.style.cursor = "";
-}
-
-function startToolResize(event: PointerEvent) {
-  if (isMobile.value) return;
-  event.preventDefault();
-  toolResizeStart.value = {
-    x: event.clientX,
-    width: toolPanelWidth.value,
-  };
-  window.addEventListener("pointermove", handleToolResizeMove);
-  window.addEventListener("pointerup", stopToolResize);
-  document.body.style.userSelect = "none";
-  document.body.style.cursor = "col-resize";
 }
 
 function hasDraggedFiles(event: DragEvent) {
@@ -226,8 +151,6 @@ onMounted(() => {
   handleMobileChange(mobileQuery);
   mobileQuery.addEventListener("change", handleMobileChange);
   window.addEventListener("hermes:open-page-sidebar", openPageSidebar);
-  window.addEventListener("resize", handleToolPanelViewportResize);
-  handleToolPanelViewportResize();
   if (profilesStore.profiles.length === 0) {
     void profilesStore.fetchProfiles();
   }
@@ -236,13 +159,6 @@ onMounted(() => {
 onUnmounted(() => {
   mobileQuery?.removeEventListener("change", handleMobileChange);
   window.removeEventListener("hermes:open-page-sidebar", openPageSidebar);
-  window.removeEventListener("resize", handleToolPanelViewportResize);
-  stopToolResize();
-});
-watch(showToolPanel, async (visible) => {
-  if (!visible || isMobile.value) return;
-  await nextTick();
-  handleToolPanelViewportResize();
 });
 
 const showRenameModal = ref(false);
@@ -330,16 +246,9 @@ const newChatWorkspace = ref("");
 const newChatLoading = ref(false);
 const CODING_AGENT_AUTH_PROVIDER_KEYS = new Set(["openai-codex", "copilot", "xai-oauth", "nous", "google-gemini-cli", "claude-oauth"]);
 
-const showEkkoAgentEntry = import.meta.env.DEV;
-const newChatAgentOptions = computed(() => {
-  const options = [
-    { label: "Hermes", value: "hermes" },
-    { label: "Claude Code", value: "claude-code" },
-    { label: "Codex", value: "codex" },
-  ];
-  if (showEkkoAgentEntry) options.push({ label: "Ekko Agent", value: "ekko-agent" });
-  return options;
-});
+const newChatAgentOptions = computed(() => [
+  { label: "Hermes", value: "hermes" },
+]);
 
 const newChatApiModeOptions = computed(() => [
   { label: t("codingAgents.protocolOpenAiChat"), value: "chat_completions" },
@@ -1319,7 +1228,6 @@ async function handleSessionModelCustomSubmit() {
           </svg>
           <span>{{ t("sidebar.settings") }}</span>
         </button>
-        <SettingsCircuitBadge />
       </div>
     </aside>
 
@@ -1630,34 +1538,6 @@ async function handleSessionModelCustomSubmit() {
         <div class="header-actions">
           <!-- chat/live mode toggle hidden -->
           <template v-if="currentMode === 'chat'">
-            <NTooltip v-if="isSuperAdmin" trigger="hover">
-              <template #trigger>
-                <NButton
-                  class="header-tool-toggle"
-                  :class="{ active: showToolPanel }"
-                  quaternary
-                  size="small"
-                  @click="showToolPanel = !showToolPanel"
-                  circle
-                >
-                  <template #icon>
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.5"
-                    >
-                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                      <line x1="9" y1="3" x2="9" y2="21" />
-                      <line x1="15" y1="3" x2="15" y2="21" />
-                    </svg>
-                  </template>
-                </NButton>
-              </template>
-              {{ t("drawer.files") }} / {{ t("drawer.terminal") }}
-            </NTooltip>
             <NTooltip trigger="hover">
               <template #trigger>
                 <NButton
@@ -1715,7 +1595,6 @@ async function handleSessionModelCustomSubmit() {
 
       <template v-if="currentMode === 'chat'">
         <div
-          ref="chatContentWrapperRef"
           class="chat-content-wrapper"
           :class="{ 'chat-content-wrapper--drop-active': isChatDropActive }"
           @dragover="handleChatDragOver"
@@ -1736,47 +1615,6 @@ async function handleSessionModelCustomSubmit() {
             :messages="chatStore.messages"
             @navigate="handleOutlineNavigate"
           />
-          <aside
-            v-if="showToolPanel"
-            class="chat-tool-panel"
-            :style="toolPanelStyle"
-          >
-            <div
-              class="chat-tool-resize-handle"
-              @pointerdown="startToolResize"
-            />
-            <div class="chat-tool-panel-inner">
-              <div class="chat-tool-tabs" role="tablist">
-                <button
-                  class="chat-tool-tab"
-                  :class="{ active: activeToolPanel === 'files' }"
-                  type="button"
-                  role="tab"
-                  :aria-selected="activeToolPanel === 'files'"
-                  @click="activeToolPanel = 'files'"
-                >
-                  {{ t("drawer.files") }}
-                </button>
-                <button
-                  class="chat-tool-tab"
-                  :class="{ active: activeToolPanel === 'terminal' }"
-                  type="button"
-                  role="tab"
-                  :aria-selected="activeToolPanel === 'terminal'"
-                  @click="activeToolPanel = 'terminal'"
-                >
-                  {{ t("drawer.terminal") }}
-                </button>
-              </div>
-              <div class="chat-tool-content">
-                <FilesPanel v-show="activeToolPanel === 'files'" />
-                <TerminalPanel
-                  v-show="activeToolPanel === 'terminal'"
-                  :visible="showToolPanel && activeToolPanel === 'terminal'"
-                />
-              </div>
-            </div>
-          </aside>
         </div>
       </template>
       <ConversationMonitorPane
@@ -2483,152 +2321,4 @@ async function handleSessionModelCustomSubmit() {
   }
 }
 
-.header-tool-toggle.active {
-  color: var(--accent-primary);
-  background: rgba(var(--accent-primary-rgb), 0.1);
-}
-
-.chat-tool-panel {
-  position: relative;
-  flex: 0 0 auto;
-  min-width: 320px;
-  max-width: 100%;
-  background: $bg-card;
-  border-left: 1px solid $border-color;
-  display: flex;
-  min-height: 0;
-  overflow: visible;
-}
-
-.chat-tool-resize-handle {
-  position: absolute;
-  left: -7px;
-  top: 0;
-  bottom: 0;
-  width: 14px;
-  cursor: col-resize;
-  z-index: 20;
-
-  &::after {
-    content: "";
-    position: absolute;
-    left: 6px;
-    top: 0;
-    bottom: 0;
-    width: 1px;
-    background:
-      linear-gradient($border-color, $border-color) top / 1px calc(50% - 26px) no-repeat,
-      linear-gradient($border-color, $border-color) bottom / 1px calc(50% - 26px) no-repeat;
-    transition: background $transition-fast;
-    z-index: 1;
-  }
-
-  &::before {
-    content: "";
-    position: absolute;
-    left: 1px;
-    top: 50%;
-    width: 12px;
-    height: 38px;
-    transform: translateY(-50%);
-    border-radius: 6px;
-    background:
-      linear-gradient($text-muted, $text-muted) center 12px / 6px 1px no-repeat,
-      linear-gradient($text-muted, $text-muted) center 19px / 6px 1px no-repeat,
-      linear-gradient($text-muted, $text-muted) center 26px / 6px 1px no-repeat,
-      $bg-card;
-    border: 1px solid $border-color;
-    opacity: 0.9;
-    transition: all $transition-fast;
-    z-index: 2;
-  }
-
-  &:hover::after {
-    background:
-      linear-gradient(var(--accent-primary), var(--accent-primary)) top / 1px calc(50% - 26px) no-repeat,
-      linear-gradient(var(--accent-primary), var(--accent-primary)) bottom / 1px calc(50% - 26px) no-repeat;
-  }
-
-  &:hover::before {
-    background:
-      linear-gradient(var(--accent-primary), var(--accent-primary)) center 12px / 6px 1px no-repeat,
-      linear-gradient(var(--accent-primary), var(--accent-primary)) center 19px / 6px 1px no-repeat,
-      linear-gradient(var(--accent-primary), var(--accent-primary)) center 26px / 6px 1px no-repeat,
-      $bg-card;
-    border-color: var(--accent-primary);
-    opacity: 1;
-  }
-}
-
-.chat-tool-panel-inner {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.chat-tool-tabs {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-  gap: 6px;
-  padding: 8px 10px;
-  border-bottom: 1px solid $border-color;
-}
-
-.chat-tool-tab {
-  height: 30px;
-  padding: 0 12px;
-  border: none;
-  border-radius: $radius-sm;
-  background: transparent;
-  color: $text-secondary;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 500;
-  transition: all $transition-fast;
-
-  &:hover {
-    color: $text-primary;
-    background: rgba(var(--accent-primary-rgb), 0.06);
-  }
-
-  &.active {
-    color: var(--accent-primary);
-    background: rgba(var(--accent-primary-rgb), 0.12);
-  }
-}
-
-.chat-tool-content {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.chat-tool-content > * {
-  height: 100%;
-  min-height: 0;
-}
-
-@media (max-width: $breakpoint-mobile) {
-  .chat-tool-panel {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 70;
-    left: 0;
-    width: 100% !important;
-    min-width: 0;
-    border-left: none;
-    box-shadow: none;
-  }
-
-  .chat-tool-resize-handle {
-    display: none;
-  }
-}
 </style>
